@@ -1,0 +1,11 @@
+name: Probe server
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Try the server
+        run: |
+          curl -s -m 20 -o /dev/null -w "home: %{http_code} in %{time_total}s\n" http://103.136.200.66/ || echo "home: FAILED"
+          curl -s -m 20 "http://103.136.200.66/search_ajax.php?q=khirer&limit=3" | head -c 500; echo
+          curl -s -m 20 -o /dev/null -w "tvs: %{http_code}\n" http://103.136.200.66/tvs.php || echo "tvs: FAILED"
