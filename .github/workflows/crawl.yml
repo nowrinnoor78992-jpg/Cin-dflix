@@ -1,0 +1,13 @@
+name: Crawl Cineplex
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/crawl.py .
+      - run: |
+          git config user.name bot; git config user.email bot@example.com
+          git add -A; git commit -m "update library" || true; git push
