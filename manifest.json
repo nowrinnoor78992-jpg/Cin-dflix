@@ -1,1 +1,16 @@
-{"id":"bd.cineplex.library","version":"0.1.0","name":"Cineplex","description":"Cineplex library (test)","resources":["catalog","meta","stream"],"types":["series","movie"],"idPrefixes":["cpx"],"catalogs":[{"type":"series","id":"cineplex-series","name":"Cineplex Series"},{"type":"movie","id":"cineplex-movies","name":"Cineplex Movies"}]}
+{
+  "name": "CineFlex",
+  "version": "1.2.4",
+  "description": "ISP media servers (CineplexBD movies+series, ShowTime movies+series)",
+  "scrapers": [
+    {
+      "id": "cineflex",
+      "name": "CineFlex",
+      "description": "CineplexBD (new server) + ShowTime + FTPBD",
+      "version": "1.2.4",
+      "filename": "dflix.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    }
+  ]
+}
