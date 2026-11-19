@@ -1,0 +1,15 @@
+name: Unpack
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          unzip -o cpx_addon.zip -x "cpx_addon/.github/*"
+          cp -r cpx_addon/. .
+          rm -rf cpx_addon cpx_addon.zip
+          git config user.name bot; git config user.email bot@example.com
+          git add -A; git commit -m "unpack addon"; git push
