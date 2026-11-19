@@ -32,6 +32,6 @@ jobs:
             ]
           }
           EOF
-          sed -i 's#python3 tools/crawl.py .#python3 addon/tools/crawl.py addon#' .github/workflows/crawl.yml || true
+          
           git config user.name bot; git config user.email bot@example.com
           git add -A; git commit -m "separate addon and scraper"; git push
