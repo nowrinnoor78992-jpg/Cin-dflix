@@ -1,0 +1,16 @@
+{
+  "name": "CineFlex",
+  "version": "1.3.0",
+  "description": "ISP media servers (CineplexBD movies+series, ShowTime movies+series)",
+  "scrapers": [
+    {
+      "id": "cineflex",
+      "name": "CineFlex",
+      "description": "CineplexBD (new server) + ShowTime + FTPBD",
+      "version": "1.3.0",
+      "filename": "dflix.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    }
+  ]
+}
