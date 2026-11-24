@@ -1,1 +1,0 @@
-{"id": "bd.cineplex.library.v2", "version": "0.4.0", "name": "Cineplex Library", "description": "Cineplex library", "resources": ["catalog", "meta"], "types": ["series", "movie"], "idPrefixes": ["cpx"], "catalogs": [{"type": "series", "id": "cpx-series", "name": "Cineplex Series"}, {"type": "movie", "id": "cpx-movies", "name": "Cineplex Movies"}]}
