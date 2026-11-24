@@ -51,12 +51,12 @@ def paged(cid, kind, items):
         write(f"{base}/skip={k}.json", {"metas": items[k:k+PAGE]})
 def slug(c): return re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")
 sm, mm = metas(series, "series", "S"), metas(movies, "movie", "M")
-paged("cineplex-series", "series", sm)
-paged("cineplex-movies", "movie", mm)
+paged("cpx-series", "series", sm)
+paged("cpx-movies", "movie", mm)
 gseries = sorted(set(v[2] for v in series.values())); gmovie = sorted(set(v[2] for v in movies.values()))
-catalogs = [{"type": "series", "id": "cineplex-series", "name": "Cineplex Series", "extra": [{"name": "genre", "options": gseries}, {"name": "skip"}]},
-            {"type": "movie", "id": "cineplex-movies", "name": "Cineplex Movies", "extra": [{"name": "genre", "options": gmovie}, {"name": "skip"}]}]
-for kind, d, ms, cid0 in (("series", series, sm, "cineplex-series"), ("movie", movies, mm, "cineplex-movies")):
+catalogs = [{"type": "series", "id": "cpx-series", "name": "Cineplex Series", "extra": [{"name": "genre", "options": gseries}, {"name": "skip"}]},
+            {"type": "movie", "id": "cpx-movies", "name": "Cineplex Movies", "extra": [{"name": "genre", "options": gmovie}, {"name": "skip"}]}]
+for kind, d, ms, cid0 in (("series", series, sm, "cpx-series"), ("movie", movies, mm, "cpx-movies")):
     for c in sorted(set(v[2] for v in d.values())):
         items = [m for m in ms if m["genres"] == [c]]
         base = f"{OUT}/catalog/{kind}/{cid0}/genre={c}"
