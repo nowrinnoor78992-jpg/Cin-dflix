@@ -42,7 +42,7 @@ def write(p, o):
 series = crawl("tvs.php", "tcategory.php", "S")
 movies = crawl("index.php", "category.php", "M")
 def metas(d, kind, pre):
-    return [{"id": f"cpx{pre}{i}", "type": kind, "name": t, "poster": im, "genres": [c]} for i, (t, im, c) in sorted(d.items(), key=lambda x: x[1][0].lower())]
+    return [{"id": f"cpx{pre}{i}", "type": kind, "name": t, "poster": im or "https://nowrinnoor78992-jpg.github.io/Cin-dflix/addon/poster.png", "genres": [c]} for i, (t, im, c) in sorted(d.items(), key=lambda x: x[1][0].lower())]
 PAGE = 15
 def paged(cid, kind, items):
     base = f"{OUT}/catalog/{kind}/{cid}"
@@ -51,12 +51,12 @@ def paged(cid, kind, items):
         write(f"{base}/skip={k}.json", {"metas": items[k:k+PAGE]})
 def slug(c): return re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")
 sm, mm = metas(series, "series", "S"), metas(movies, "movie", "M")
-paged("cpx-series", "series", sm)
-paged("cpx-movies", "movie", mm)
+paged("cineplex-series", "series", sm)
+paged("cineplex-movies", "movie", mm)
 gseries = sorted(set(v[2] for v in series.values())); gmovie = sorted(set(v[2] for v in movies.values()))
-catalogs = [{"type": "series", "id": "cpx-series", "name": "Cineplex Series", "extra": [{"name": "genre", "options": gseries}, {"name": "skip"}]},
-            {"type": "movie", "id": "cpx-movies", "name": "Cineplex Movies", "extra": [{"name": "genre", "options": gmovie}, {"name": "skip"}]}]
-for kind, d, ms, cid0 in (("series", series, sm, "cpx-series"), ("movie", movies, mm, "cpx-movies")):
+catalogs = [{"type": "series", "id": "cineplex-series", "name": "Cineplex Series", "extra": [{"name": "genre", "options": gseries}, {"name": "skip"}]},
+            {"type": "movie", "id": "cineplex-movies", "name": "Cineplex Movies", "extra": [{"name": "genre", "options": gmovie}, {"name": "skip"}]}]
+for kind, d, ms, cid0 in (("series", series, sm, "cineplex-series"), ("movie", movies, mm, "cineplex-movies")):
     for c in sorted(set(v[2] for v in d.values())):
         items = [m for m in ms if m["genres"] == [c]]
         base = f"{OUT}/catalog/{kind}/{cid0}/genre={c}"
@@ -76,7 +76,7 @@ for i, (t, im, c) in series.items():
     eps = sorted(set((int(s), int(e)) for s, e in re.findall(r'season=(\d+)&(?:amp;)?ep=(\d+)', h)))
     if not eps: eps = [(1, e) for e in range(1, 2)]
     vids = [{"id": f"cpxS{i}:{s}:{e}", "title": f"Episode {e}", "season": s, "episode": e, "released": "2020-01-01T00:00:00.000Z"} for s, e in eps]
-    write(f"{OUT}/meta/series/cpxS{i}.json", {"meta": {"id": f"cpxS{i}", "type": "series", "name": t, "poster": im, "videos": vids}})
+    write(f"{OUT}/meta/series/cpxS{i}.json", {"meta": {"id": f"cpxS{i}", "type": "series", "name": t, "poster": im or "https://nowrinnoor78992-jpg.github.io/Cin-dflix/addon/poster.png", "videos": vids}})
 for i, (t, im, c) in movies.items():
     write(f"{OUT}/meta/movie/cpxM{i}.json", {"meta": {"id": f"cpxM{i}", "type": "movie", "name": t, "poster": im}})
 print("series", len(series), "movies", len(movies))
