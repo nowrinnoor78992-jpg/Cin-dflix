@@ -646,8 +646,17 @@ function seriesStreams(info, season, episode) {
 
 // ---- items that come from the "Cineplex" library add-on: id looks like cpxS34392 / cpxM1234 ------
 function parseCpx(id) {
-  var m = String(id === undefined || id === null ? "" : id).match(/cpx([SM])(\d+)/i);
-  return m ? { kind: m[1].toUpperCase(), id: m[2] } : null;
+  var t = String(id === undefined || id === null ? "" : id);
+  var m = t.match(/cpx([SM])(\d+)/i);
+  if (m) return { kind: m[1].toUpperCase(), id: m[2] };
+  // reserved TMDB-looking ids: 99000000+N = Cineplex series N, 98000000+N = Cineplex movie N
+  m = t.match(/^(?:tmdb:)?(\d{8,9})$/i);
+  if (m) {
+    var n = Number(m[1]);
+    if (n >= 99000000 && n < 100000000) return { kind: "S", id: String(n - 99000000) };
+    if (n >= 98000000 && n < 99000000) return { kind: "M", id: String(n - 98000000) };
+  }
+  return null;
 }
 
 function directStreams(cpx, season, episode) {

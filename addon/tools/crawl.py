@@ -42,7 +42,7 @@ def write(p, o):
 series = crawl("tvs.php", "tcategory.php", "S")
 movies = crawl("index.php", "category.php", "M")
 def metas(d, kind, pre):
-    return [{"id": f"cpx{pre}{i}", "type": kind, "name": t, "poster": im, "genres": [c]} for i, (t, im, c) in sorted(d.items(), key=lambda x: x[1][0].lower())]
+    return [{"id": (f"tmdb:{99000000+int(i)}" if pre == "S" else f"tmdb:{98000000+int(i)}"), "type": kind, "name": t, "poster": im, "genres": [c]} for i, (t, im, c) in sorted(d.items(), key=lambda x: x[1][0].lower())]
 PAGE = 15
 def paged(cid, kind, items):
     base = f"{OUT}/catalog/{kind}/{cid}"
@@ -75,8 +75,8 @@ for i, (t, im, c) in series.items():
     h = get(f"tview.php?id={i}")
     eps = sorted(set((int(s), int(e)) for s, e in re.findall(r'season=(\d+)&(?:amp;)?ep=(\d+)', h)))
     if not eps: eps = [(1, e) for e in range(1, 2)]
-    vids = [{"id": f"cpxS{i}:{s}:{e}", "title": f"Episode {e}", "season": s, "episode": e, "released": "2020-01-01T00:00:00.000Z"} for s, e in eps]
-    write(f"{OUT}/meta/series/cpxS{i}.json", {"meta": {"id": f"cpxS{i}", "type": "series", "name": t, "poster": im, "videos": vids}})
+    vids = [{"id": f"tmdb:{99000000+int(i)}:{s}:{e}", "title": f"Episode {e}", "season": s, "episode": e, "released": "2020-01-01T00:00:00.000Z"} for s, e in eps]
+    write(f"{OUT}/meta/series/tmdb:{99000000+int(i)}.json", {"meta": {"id": f"tmdb:{99000000+int(i)}", "type": "series", "name": t, "poster": im, "videos": vids}})
 for i, (t, im, c) in movies.items():
-    write(f"{OUT}/meta/movie/cpxM{i}.json", {"meta": {"id": f"cpxM{i}", "type": "movie", "name": t, "poster": im}})
+    write(f"{OUT}/meta/movie/tmdb:{98000000+int(i)}.json", {"meta": {"id": f"tmdb:{98000000+int(i)}", "type": "movie", "name": t, "poster": im}})
 print("series", len(series), "movies", len(movies))
