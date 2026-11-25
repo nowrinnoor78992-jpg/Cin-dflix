@@ -38,10 +38,19 @@ function ckString() {
 
 function ckNames() { return Object.keys(CK).join(","); }
 
+var SCLOG = []; // for each response: how many Set-Cookie names the runtime showed us (shown in the source title)
+
 function grabCookies(r) {
   try {
-    // same as the version that worked on the TV: only the three gate cookies
-    var sc = (r.headers && r.headers.get && r.headers.get("set-cookie")) || "";
+    // different runtimes expose Set-Cookie in different ways: try them all and merge
+    var parts = [], h = r && r.headers;
+    try { var v = h && h.get && h.get("set-cookie"); if (v) parts.push(v); } catch (e1) {}
+    try { if (h && typeof h.getSetCookie === "function") { var l = h.getSetCookie(); if (l && l.length) parts.push(l.join(", ")); } } catch (e2) {}
+    try { if (h && typeof h.forEach === "function") h.forEach(function (val, key) { if (String(key).toLowerCase() === "set-cookie") parts.push(val); }); } catch (e3) {}
+    try { if (h && typeof h.raw === "function") { var rw = h.raw()["set-cookie"]; if (rw && rw.length) parts.push(rw.join(", ")); } } catch (e4) {}
+    var sc = parts.join(", ");
+    var names = sc ? sc.split(/,\s*(?=[A-Za-z0-9_\-]+=)/).map(function (c) { return String(c).split("=")[0].trim(); }) : [];
+    SCLOG.push(names.length ? names.join("+") : "none");
     var re = /(hlse|hlsk|REDFORCE)=([^;,\s]+)/g, m;
     while ((m = re.exec(sc))) { CK[m[1]] = m[2]; CK_TIME = Date.now(); }
     return !!sc;
@@ -139,7 +148,7 @@ function cxVideos(html, base) {
 function makeStream(label, url, title, withHeaders) {
   // quality from the title, else from the file name in the link; Cineplex links without any -> HD
   var q = (String(title).match(QUALITY) || [])[1] || (String(url).match(QUALITY) || [])[1] || (label === "CineplexBD" ? "HD" : "Unknown");
-  if (withHeaders && ckNames()) title = title + " · ck:" + ckNames();
+  if (withHeaders && ckNames()) title = title + " · ck:" + ckNames() + " · sc:" + SCLOG.join("/");
   var s = { name: label, title: title, quality: /^\d+p$/i.test(q) ? q.toLowerCase() : q.toUpperCase(), url: url };
   if (withHeaders) {
     s.headers = { "User-Agent": UA, "Referer": CX + "/" };
@@ -727,7 +736,7 @@ function directStreams(cpx, season, episode) {
 function debugStream() {
   try { console.log("[CineFlex] " + DBG.join(" | ")); } catch (e) {}
   // DIAGNOSIS BUILD: when nothing was found, show one "CineFlex debug" row whose text says why
-  return [{ name: "CineFlex debug", title: "v1.3.3-b " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
+  return [{ name: "CineFlex debug", title: "v1.3.3-c " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
 }
 
 // the title of a Cineplex library item, read from the add-on's own meta file (name, year)
@@ -743,7 +752,7 @@ function libraryTitle(cpx) {
 }
 
 function getStreamsInner(tmdbId, mediaType, season, episode) {
-  DBG = [];
+  DBG = []; SCLOG = [];
   CK = {}; CK_TIME = 0; // fresh cookies for every request, as before (the server resets them every 6 h)
   var isMovie = mediaType === "movie";
   var cpx = parseCpx(tmdbId);
@@ -785,7 +794,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     setTimeout(function () { DBG.push("gave up after 3.8 s"); resolve(null); }, 3800);
   });
   return Promise.race([work, timer]).then(function (out) {
-    DBG.push("took " + (Date.now() - t0) + " ms");
+    DBG.push("sc: " + SCLOG.join("/")); DBG.push("took " + (Date.now() - t0) + " ms");
     if (out && out.length) return out;
     return debugStream();
   });
