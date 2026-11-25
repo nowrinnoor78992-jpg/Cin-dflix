@@ -40,24 +40,11 @@ function ckNames() { return Object.keys(CK).join(","); }
 
 function grabCookies(r) {
   try {
-    var list = [];
-    if (r.headers && typeof r.headers.getSetCookie === "function") list = r.headers.getSetCookie() || [];
-    if (!list.length) {
-      var sc = (r.headers && r.headers.get && r.headers.get("set-cookie")) || "";
-      // several cookies may be merged with ", " ; a date like "Wed, 21 Oct" is not followed by name=
-      list = sc ? sc.split(/,\s*(?=[A-Za-z0-9_.\-]+=)/) : [];
-    }
-    list.forEach(function (c) {
-      var kv = String(c).split(";")[0].trim();
-      var i = kv.indexOf("=");
-      if (i <= 0) return;
-      var k = kv.slice(0, i).trim(), v = kv.slice(i + 1).trim();
-      if (!k || COOKIE_ATTR.test(k)) return;
-      if (v === "" || /^deleted$/i.test(v)) { delete CK[k]; return; }
-      CK[k] = v;
-      CK_TIME = Date.now();
-    });
-    return list.length > 0;
+    // same as the version that worked on the TV: only the three gate cookies
+    var sc = (r.headers && r.headers.get && r.headers.get("set-cookie")) || "";
+    var re = /(hlse|hlsk|REDFORCE)=([^;,\s]+)/g, m;
+    while ((m = re.exec(sc))) { CK[m[1]] = m[2]; CK_TIME = Date.now(); }
+    return !!sc;
   } catch (e) { return false; }
 }
 
@@ -632,6 +619,29 @@ function pickSeriesHit(list, info) {
   return null;
 }
 
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+// ask for the playlist until the server stops answering 404 (max ~6 s), so the player's first request succeeds
+function warmUp(url) {
+  var tries = 0;
+  function go() {
+    tries++;
+    var h = { "User-Agent": UA, "Referer": CX + "/", "Accept": "*/*" };
+    if (ckString()) h["Cookie"] = ckString();
+    return fetch(url, { headers: h }).then(function (r) {
+      grabCookies(r);
+      DBG.push("warm " + tries + ": HTTP " + r.status);
+      if (r.ok || r.status !== 404 || tries >= 5) return r.ok;
+      return sleep(1200).then(go);
+    }).catch(function (e) {
+      DBG.push("warm " + tries + " error: " + (e && e.message));
+      if (tries >= 5) return false;
+      return sleep(1200).then(go);
+    });
+  }
+  return go();
+}
+
 function seriesStreamsCx(info, season, episode, forcedId) {
   var mid = forcedId || manualId(MANUAL_SERIES, info);
   var found = mid ? Promise.resolve({ id: mid, series: true, title: info.name, year: info.year, category: "" })
@@ -661,7 +671,11 @@ function seriesStreamsCx(info, season, episode, forcedId) {
       return getText(url + "&meta=1").catch(function () { return ""; }).then(function () {
         DBG.push("cookies: " + (Object.keys(CK).join(",") || "none"));
         var label = hit.title + " S" + ("0" + season).slice(-2) + "E" + ("0" + episode).slice(-2);
-        return vids.map(function (u) { return makeStream("CineplexBD", u, label, true); });
+        // the /hls/ playlist is made on demand and answers 404 until it is ready: ask once now, retry a few times
+        var warm = vids[0] && /\.m3u8/i.test(vids[0]) ? warmUp(vids[0]) : Promise.resolve();
+        return warm.then(function () {
+          return vids.map(function (u) { return makeStream("CineplexBD", u, label, true); });
+        });
       });
     });
   }).catch(function (e) { DBG.push("CX series error: " + (e && e.message)); return []; });
@@ -733,7 +747,7 @@ function libraryTitle(cpx) {
 
 function getStreams(tmdbId, mediaType, season, episode) {
   DBG = [];
-  if (CK_TIME && Date.now() - CK_TIME > 5 * 3600 * 1000) { CK = {}; CK_TIME = 0; } // the server resets them every 6 h
+  CK = {}; CK_TIME = 0; // fresh cookies for every request, as before (the server resets them every 6 h)
   var isMovie = mediaType === "movie";
   var cpx = parseCpx(tmdbId);
   DBG.push("id: " + tmdbId + " type: " + mediaType + " s" + season + " e" + episode);
