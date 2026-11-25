@@ -1,4 +1,4 @@
-// CineFlex scraper for Nuvio (Legacy tpk / plugin runtime).  v1.3.3
+// CineFlex scraper for Nuvio (Legacy tpk / plugin runtime).  v1.3.5
 // Sources: CineplexBD (new server), FTPBD (open folder listings), ShowTime (ISP-only).  Movies and series.
 //
 // New CineplexBD server (http://103.136.200.66):
@@ -736,7 +736,7 @@ function directStreams(cpx, season, episode) {
 function debugStream() {
   try { console.log("[CineFlex] " + DBG.join(" | ")); } catch (e) {}
   // DIAGNOSIS BUILD: when nothing was found, show one "CineFlex debug" row whose text says why
-  return [{ name: "CineFlex debug", title: "v1.3.3-c " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
+  return [{ name: "CineFlex debug", title: "v1.3.5-c " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
 }
 
 // the title of a Cineplex library item, read from the add-on's own meta file (name, year)
