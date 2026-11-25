@@ -150,7 +150,8 @@ function cxVideos(html, base) {
 }
 
 function makeStream(label, url, title, withHeaders) {
-  var q = (String(title).match(QUALITY) || [])[1] || "Unknown";
+  // quality from the title, else from the file name in the link; Cineplex links without any -> HD
+  var q = (String(title).match(QUALITY) || [])[1] || (String(url).match(QUALITY) || [])[1] || (label === "CineplexBD" ? "HD" : "Unknown");
   if (withHeaders && ckNames()) title = title + " · ck:" + ckNames();
   var s = { name: label, title: title, quality: /^\d+p$/i.test(q) ? q.toLowerCase() : q.toUpperCase(), url: url };
   if (withHeaders) {
@@ -511,32 +512,41 @@ function ftpSeries(info, season, episode) {
 }
 
 // ---- movies ------------------------------------------------------------------------------------
+// all playable links of one Cineplex movie (player.php holds the signed mp4; view.php as a fallback)
+function cxMovieLinks(id) {
+  var href = CX + "/player.php?id=" + id;
+  return getText(href).then(function (html) {
+    var urls = cxVideos(html, href);
+    if (urls.length) return urls;
+    var v = CX + "/view.php?id=" + id;
+    return getText(v).then(function (h2) { return cxVideos(h2, v); });
+  }).catch(function (e) { DBG.push("CX movie error: " + (e && e.message)); return []; });
+}
+
+// Cineplex first: its links are listed before the other sources
 function movieStreams(info) {
   return Promise.all([searchCxFuzzy(info, function (l) {
     return l.some(function (h) { return !h.series && titleMatches(h.title, h.year, info.name, info.year); });
   }), searchSt(info.name), within(ftpMovie(info), FTP_DEADLINE, "FTP movie")]).then(function (res) {
-    var out = [];
     var cxHits = res[0].filter(function (h) { return !h.series && titleMatches(h.title, h.year, info.name, info.year); }).slice(0, 3);
     var mmid = manualId(MANUAL_MOVIE, info);
     if (mmid && !cxHits.some(function (h) { return String(h.id) === String(mmid); })) cxHits.unshift({ id: mmid, series: false, title: info.name, year: info.year, category: "" });
     DBG.push("CX movie hits: " + cxHits.length);
+    var others = [];
     res[1].files.filter(function (h) { return titleMatches(h.title, null, info.name, info.year); }).forEach(function (h) {
-      out.push(makeStream("ShowTime", h.url, h.title + (h.size ? " · " + h.size : ""), false));
+      others.push(makeStream("ShowTime", h.url, h.title + (h.size ? " · " + h.size : ""), false));
     });
-    out = out.concat(res[2]);
+    others = others.concat(res[2]);
     return Promise.all(cxHits.map(function (hit) {
-      var href = CX + "/view.php?id=" + hit.id;
-      return getText(href)
-        .then(function (html) {
-          cxVideos(html, href).forEach(function (u) {
-            out.push(makeStream("CineplexBD", u, hit.title + (hit.category ? " · " + hit.category : ""), true));
-          });
-        })
-        .catch(function (e) { DBG.push("CX movie page error: " + (e && e.message)); });
-    })).then(function () {
+      return cxMovieLinks(hit.id).then(function (urls) {
+        return urls.map(function (u) { return makeStream("CineplexBD", u, hit.title + (hit.category ? " · " + hit.category : ""), true); });
+      });
+    })).then(function (lists) {
+      var cx = [].concat.apply([], lists);
       // the cookies are only known once the pages were read: stamp them on every CineplexBD stream
-      out.forEach(function (s) { if (s.name === "CineplexBD" && s.headers && ckString()) s.headers["Cookie"] = ckString(); });
-      return out;
+      cx.forEach(function (s) { if (s.headers && ckString()) s.headers["Cookie"] = ckString(); });
+      // same order as before: other sources first, Cineplex after them
+      return others.concat(cx);
     });
   });
 }
@@ -709,6 +719,18 @@ function debugStream() {
   return [];
 }
 
+// the title of a Cineplex library item, read from the add-on's own meta file (name, year)
+function libraryTitle(cpx) {
+  var base = cpx.kind === "M" ? 98000000 : 99000000;
+  var type = cpx.kind === "M" ? "movie" : "series";
+  var url = "https://nowrinnoor78992-jpg.github.io/Cin-dflix/addon/meta/" + type + "/tmdb:" + (base + Number(cpx.id)) + ".json";
+  return getText(url).then(function (t) {
+    var m = JSON.parse(t).meta || {};
+    var y = m.year ? parseInt(String(m.year), 10) : null;
+    return { name: m.name || "", year: isNaN(y) ? null : y, original: "", lang: "", anim: false };
+  }).catch(function (e) { DBG.push("library meta error: " + (e && e.message)); return null; });
+}
+
 function getStreams(tmdbId, mediaType, season, episode) {
   DBG = [];
   if (CK_TIME && Date.now() - CK_TIME > 5 * 3600 * 1000) { CK = {}; CK_TIME = 0; } // the server resets them every 6 h
@@ -718,7 +740,13 @@ function getStreams(tmdbId, mediaType, season, episode) {
   if (cpx) {
     return directStreams(cpx, season, episode).then(function (out) {
       if (out.length) return out;
-      return debugStream();
+      // not found on Cineplex -> look for the same title in the other sources, using the add-on's own title
+      return libraryTitle(cpx).then(function (info) {
+        if (!info || !info.name) return debugStream();
+        DBG.push("library fallback: " + info.name);
+        if (cpx.kind === "M") return movieStreams(info);
+        return seriesStreams(info, season, episode);
+      });
     });
   }
   if (!isMovie && (!season || !episode)) return Promise.resolve([]);
