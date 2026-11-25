@@ -726,11 +726,8 @@ function directStreams(cpx, season, episode) {
 
 function debugStream() {
   try { console.log("[CineFlex] " + DBG.join(" | ")); } catch (e) {}
-  var st = typeof SCRAPER_SETTINGS !== "undefined" && SCRAPER_SETTINGS ? SCRAPER_SETTINGS : {};
-  if (st.debug) {
-    return [{ name: "CineFlex debug", title: DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
-  }
-  return [];
+  // DIAGNOSIS BUILD: when nothing was found, show one "CineFlex debug" row whose text says why
+  return [{ name: "CineFlex debug", title: "v1.3.3 " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
 }
 
 // the title of a Cineplex library item, read from the add-on's own meta file (name, year)
