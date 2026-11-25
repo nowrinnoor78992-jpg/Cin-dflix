@@ -1,4 +1,4 @@
-// CineFlex scraper for Nuvio (Legacy tpk / plugin runtime).  v1.2.4
+// CineFlex scraper for Nuvio (Legacy tpk / plugin runtime).  v1.3.3
 // Sources: CineplexBD (new server), FTPBD (open folder listings), ShowTime (ISP-only).  Movies and series.
 //
 // New CineplexBD server (http://103.136.200.66):
@@ -28,18 +28,36 @@ var MANUAL_MOVIE = {
 };
 
 var DBG = [];
-var CK = {}; // cookies the new server hands out (hlse / hlsk / REDFORCE)
+var CK = {}; // cookies the new server hands out (hlse / hlsk / REDFORCE ... whatever it sets)
+var CK_TIME = 0;
+var COOKIE_ATTR = /^(path|domain|expires|max-age|samesite|secure|httponly|priority|partitioned)$/i;
 
 function ckString() {
   return Object.keys(CK).map(function (k) { return k + "=" + CK[k]; }).join("; ");
 }
 
+function ckNames() { return Object.keys(CK).join(","); }
+
 function grabCookies(r) {
   try {
-    var sc = (r.headers && r.headers.get && r.headers.get("set-cookie")) || "";
-    var re = /(hlse|hlsk|REDFORCE)=([^;,\s]+)/g, m;
-    while ((m = re.exec(sc))) CK[m[1]] = m[2];
-    return !!sc;
+    var list = [];
+    if (r.headers && typeof r.headers.getSetCookie === "function") list = r.headers.getSetCookie() || [];
+    if (!list.length) {
+      var sc = (r.headers && r.headers.get && r.headers.get("set-cookie")) || "";
+      // several cookies may be merged with ", " ; a date like "Wed, 21 Oct" is not followed by name=
+      list = sc ? sc.split(/,\s*(?=[A-Za-z0-9_.\-]+=)/) : [];
+    }
+    list.forEach(function (c) {
+      var kv = String(c).split(";")[0].trim();
+      var i = kv.indexOf("=");
+      if (i <= 0) return;
+      var k = kv.slice(0, i).trim(), v = kv.slice(i + 1).trim();
+      if (!k || COOKIE_ATTR.test(k)) return;
+      if (v === "" || /^deleted$/i.test(v)) { delete CK[k]; return; }
+      CK[k] = v;
+      CK_TIME = Date.now();
+    });
+    return list.length > 0;
   } catch (e) { return false; }
 }
 
@@ -133,6 +151,7 @@ function cxVideos(html, base) {
 
 function makeStream(label, url, title, withHeaders) {
   var q = (String(title).match(QUALITY) || [])[1] || "Unknown";
+  if (withHeaders && ckNames()) title = title + " · ck:" + ckNames();
   var s = { name: label, title: title, quality: /^\d+p$/i.test(q) ? q.toLowerCase() : q.toUpperCase(), url: url };
   if (withHeaders) {
     s.headers = { "User-Agent": UA, "Referer": CX + "/" };
@@ -673,20 +692,24 @@ function directStreams(cpx, season, episode) {
 }
 
 function debugStream() {
-  return { name: "CineFlex debug", title: DBG.join(" | ").slice(0, 600), quality: "480p", size: "1 MB", url: CX + "/debug-" + Date.now() + ".mp4",
-           headers: { "User-Agent": UA } };
+  try { console.log("[CineFlex] " + DBG.join(" | ")); } catch (e) {}
+  var st = typeof SCRAPER_SETTINGS !== "undefined" && SCRAPER_SETTINGS ? SCRAPER_SETTINGS : {};
+  if (st.debug) {
+    return [{ name: "CineFlex debug", title: DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
+  }
+  return [];
 }
 
 function getStreams(tmdbId, mediaType, season, episode) {
   DBG = [];
-  CK = {};
+  if (CK_TIME && Date.now() - CK_TIME > 5 * 3600 * 1000) { CK = {}; CK_TIME = 0; } // the server resets them every 6 h
   var isMovie = mediaType === "movie";
   var cpx = parseCpx(tmdbId);
   DBG.push("id: " + tmdbId + " type: " + mediaType + " s" + season + " e" + episode);
   if (cpx) {
     return directStreams(cpx, season, episode).then(function (out) {
       if (out.length) return out;
-      return [debugStream()];
+      return debugStream();
     });
   }
   if (!isMovie && (!season || !episode)) return Promise.resolve([]);
@@ -699,7 +722,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     .catch(function (e) { DBG.push("error: " + (e && e.message)); return []; })
     .then(function (out) {
       if (out.length) return out;
-      return [debugStream()];
+      return debugStream();
     });
 }
 
