@@ -631,12 +631,12 @@ function warmUp(url) {
     return fetch(url, { headers: h }).then(function (r) {
       grabCookies(r);
       DBG.push("warm " + tries + ": HTTP " + r.status);
-      if (r.ok || r.status !== 404 || tries >= 5) return r.ok;
-      return sleep(1200).then(go);
+      if (r.ok || r.status !== 404 || tries >= 2) return r.ok;
+      return sleep(900).then(go);
     }).catch(function (e) {
       DBG.push("warm " + tries + " error: " + (e && e.message));
-      if (tries >= 5) return false;
-      return sleep(1200).then(go);
+      if (tries >= 2) return false;
+      return sleep(900).then(go);
     });
   }
   return go();
@@ -727,7 +727,7 @@ function directStreams(cpx, season, episode) {
 function debugStream() {
   try { console.log("[CineFlex] " + DBG.join(" | ")); } catch (e) {}
   // DIAGNOSIS BUILD: when nothing was found, show one "CineFlex debug" row whose text says why
-  return [{ name: "CineFlex debug", title: "v1.3.3 " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
+  return [{ name: "CineFlex debug", title: "v1.3.3-b " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
 }
 
 // the title of a Cineplex library item, read from the add-on's own meta file (name, year)
@@ -742,7 +742,7 @@ function libraryTitle(cpx) {
   }).catch(function (e) { DBG.push("library meta error: " + (e && e.message)); return null; });
 }
 
-function getStreams(tmdbId, mediaType, season, episode) {
+function getStreamsInner(tmdbId, mediaType, season, episode) {
   DBG = [];
   CK = {}; CK_TIME = 0; // fresh cookies for every request, as before (the server resets them every 6 h)
   var isMovie = mediaType === "movie";
@@ -758,7 +758,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
         if (cpx.kind === "M") return movieStreams(info);
         return seriesStreams(info, season, episode);
       });
-    });
+    }).catch(function (e) { DBG.push("library error: " + (e && e.message)); return []; });
   }
   if (!isMovie && (!season || !episode)) return Promise.resolve([]);
   return getInfo(tmdbId, mediaType)
@@ -772,6 +772,23 @@ function getStreams(tmdbId, mediaType, season, episode) {
       if (out.length) return out;
       return debugStream();
     });
+}
+
+// Nuvio decides about 4-5 s after asking: answer before that, always with something (a debug row says why)
+function getStreams(tmdbId, mediaType, season, episode) {
+  var t0 = Date.now();
+  var work;
+  try { work = Promise.resolve(getStreamsInner(tmdbId, mediaType, season, episode)); }
+  catch (e) { DBG.push("crash: " + (e && e.message)); work = Promise.resolve([]); }
+  work = work.catch(function (e) { DBG.push("error: " + (e && e.message)); return []; });
+  var timer = new Promise(function (resolve) {
+    setTimeout(function () { DBG.push("gave up after 3.8 s"); resolve(null); }, 3800);
+  });
+  return Promise.race([work, timer]).then(function (out) {
+    DBG.push("took " + (Date.now() - t0) + " ms");
+    if (out && out.length) return out;
+    return debugStream();
+  });
 }
 
 module.exports = { getStreams: getStreams };
