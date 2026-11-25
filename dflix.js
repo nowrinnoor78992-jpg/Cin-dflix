@@ -140,7 +140,7 @@ function cxVideos(html, base) {
     if (/\.(?:m3u8|mp4|mkv|avi|webm|mov)(?:\?|$)/i.test(m[1]) || /\/hls\//i.test(m[1])) out.push(absUrl(m[1], base));
   }
   if (!out.length) {
-    var abs = clean.match(/https?:\/\/[^"'\s<>\\]+?\.(?:mp4|mkv|m3u8|avi|webm|mov)(?:\?[^"'\s<>\\]*)?/gi) || [];
+    var abs = clean.match(/https?:\/\/[^"'\s<>\\]+?\.(?:mp4|mkv|m3u8|avi|webm|mov)(?:\?[^"'\s<>\\]*)?(?=["'\s<>\\])/gi) || [];
     out = out.concat(abs);
     var re = /["']([^"'<>]+?\.(?:mp4|mkv|m3u8|avi|webm|mov)(?:\?[^"'<>]*)?)["']/gi;
     while ((m = re.exec(clean))) out.push(absUrl(m[1], base));
@@ -682,9 +682,18 @@ function directStreams(cpx, season, episode) {
   if (cpx.kind === "S") {
     return seriesStreamsCx({ name: "Cineplex" }, season || 1, episode || 1, cpx.id);
   }
-  var href = CX + "/view.php?id=" + cpx.id;
+  // the movie's "Watch Movie" button opens player.php?id=N; that page holds the signed mp4 link
+  // (a /v/m/... path with md5 + expires, valid for a few hours), so fetch it fresh on every play
+  var href = CX + "/player.php?id=" + cpx.id;
   return getText(href).then(function (html) {
-    var out = cxVideos(html, href).map(function (u) { return makeStream("CineplexBD", u, "Cineplex movie " + cpx.id, true); });
+    var urls = cxVideos(html, href);
+    if (!urls.length) {
+      DBG.push("CX player.php: no link, trying view.php");
+      return getText(CX + "/view.php?id=" + cpx.id).then(function (h2) { return cxVideos(h2, CX + "/view.php?id=" + cpx.id); });
+    }
+    return urls;
+  }).then(function (urls) {
+    var out = urls.map(function (u) { return makeStream("CineplexBD", u, "Cineplex movie " + cpx.id, true); });
     DBG.push("CX direct movie: " + out.length + " link");
     out.forEach(function (s) { if (s.headers && ckString()) s.headers["Cookie"] = ckString(); });
     return out;
