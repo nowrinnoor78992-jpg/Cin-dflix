@@ -1,5 +1,11 @@
-// CineFlex scraper for Nuvio (Legacy tpk / plugin runtime).  v1.3.5
+// CineFlex scraper for Nuvio (Legacy tpk / plugin runtime).  v1.3.6
 // Sources: CineplexBD (new server), FTPBD (open folder listings), ShowTime (ISP-only).  Movies and series.
+//
+// v1.3.6: no more "debug row instead of the sources on the first open".
+//  - every source (CineplexBD / FTPBD / ShowTime) hands in its streams the moment it is done; when Nuvio's
+//    deadline comes, whatever has arrived is returned (before, ONE slow source made everything vanish)
+//  - TMDB answers and CineplexBD searches are cached, the extra search words run in parallel
+//  - the debug row only shows when every source finished and found nothing (never just because of timing)
 //
 // New CineplexBD server (http://103.136.200.66):
 //  - /search_ajax.php?q=..&limit=..  -> JSON { results: [{id,type,title,year,category,url,poster}] }
@@ -16,6 +22,11 @@ var VIDX = /\.(mp4|mkv|avi|m4v|mov|webm|ts|mpg|wmv|flv)(\?|$)/i;
 var QUALITY = /(2160p|4k|1080p|720p|480p|WEB-?DL|WEBRip|BluRay|HDRip|DVDRip|HDTV|CAMRip|HDCAM)/i;
 var TIMEOUT = 12000;
 
+// ---- SETTINGS ------------------------------------------------------------------------------------
+var DEADLINE = 3800;            // ms: answer with what has arrived by then (Nuvio decides about 4-5 s after asking)
+var SHOW_DEBUG_ROW = true;      // debug row when every source finished and found nothing
+var DEBUG_ON_TIMEOUT = false;   // debug row when the deadline hit and NOTHING had arrived yet (false = just empty)
+
 // ---- MANUAL LIST: titles the site spells so differently that no search finds them ----------------
 // Left: the title as TMDB / Nuvio shows it (capitals and spaces do not matter).
 // Right: the number in the site link, e.g. watch.php?series_id=34023  ->  34023
@@ -28,9 +39,14 @@ var MANUAL_MOVIE = {
 };
 
 var DBG = [];
+var PART = {};  // streams of the request that is running, filled source by source (see assemble)
 var CK = {}; // cookies the new server hands out (hlse / hlsk / REDFORCE ... whatever it sets)
 var CK_TIME = 0;
 var COOKIE_ATTR = /^(path|domain|expires|max-age|samesite|secure|httponly|priority|partitioned)$/i;
+
+// caches that live as long as the plugin stays loaded: the second open of a title is fast
+var TMDBC = {};
+var CXC = {};
 
 function ckString() {
   return Object.keys(CK).map(function (k) { return k + "=" + CK[k]; }).join("; ");
@@ -159,11 +175,15 @@ function makeStream(label, url, title, withHeaders) {
 
 function getInfo(tmdbId, mediaType) {
   var kind = mediaType === "movie" ? "movie" : "tv";
+  var ck = kind + ":" + tmdbId;
+  if (TMDBC[ck]) return Promise.resolve(TMDBC[ck]);
   return getText("https://api.themoviedb.org/3/" + kind + "/" + tmdbId + "?api_key=" + tmdbKey()).then(function (t) {
     var j = JSON.parse(t);
     var anim = (j.genres || []).some(function (g) { return g && g.id === 16; });
-    return { name: j.title || j.name || "", original: j.original_title || j.original_name || "",
-             year: yearOf(j.release_date || j.first_air_date), lang: j.original_language || "", anim: anim };
+    var info = { name: j.title || j.name || "", original: j.original_title || j.original_name || "",
+                 year: yearOf(j.release_date || j.first_air_date), lang: j.original_language || "", anim: anim };
+    if (info.name) TMDBC[ck] = info;
+    return info;
   });
 }
 
@@ -198,7 +218,7 @@ function parseCards(html) {
   return out;
 }
 
-function searchCx(title) {
+function searchCxRaw(title) {
   return getText(CX + "/search_ajax.php?q=" + encodeURIComponent(title) + "&limit=30")
     .then(function (t) {
       var j = JSON.parse(t);
@@ -224,6 +244,18 @@ function searchCx(title) {
     });
 }
 
+// same answer for the same words: kept while the plugin is loaded (empty answers are not kept)
+function searchCx(title) {
+  var k = String(title).toLowerCase();
+  if (CXC[k]) return CXC[k];
+  var p = searchCxRaw(title).then(function (list) {
+    if (!list.length) delete CXC[k];
+    return list;
+  });
+  CXC[k] = p;
+  return p;
+}
+
 // the site search is a plain substring search, so "Lalkuthi" does not find "Lal Kuthi":
 // try the full title, the original title, the first word and the first letters of a long single word
 function searchQueries(info) {
@@ -236,17 +268,17 @@ function searchQueries(info) {
   return qs.filter(function (q) { if (!q || seen[q]) return false; seen[q] = 1; return true; }).slice(0, 5);
 }
 
+// first the full title; only when that does not give a match the other words, all at once (was: one after the other)
 function searchCxFuzzy(info, good) {
-  var qs = searchQueries(info), last = [], i = 0;
-  function next() {
-    if (i >= qs.length) return Promise.resolve(last);
-    var q = qs[i++];
-    return searchCx(q).then(function (list) {
-      last = list;
-      return good(list) ? list : next();
+  var qs = searchQueries(info);
+  if (!qs.length) return Promise.resolve([]);
+  return searchCx(qs[0]).then(function (first) {
+    if (good(first) || qs.length === 1) return first;
+    return Promise.all(qs.slice(1).map(searchCx)).then(function (lists) {
+      for (var i = 0; i < lists.length; i++) if (good(lists[i])) return lists[i];
+      return lists.length ? lists[lists.length - 1] : first;
     });
-  }
-  return next();
+  });
 }
 
 // ---- ShowTime ----------------------------------------------------------------------------------
@@ -507,6 +539,20 @@ function ftpSeries(info, season, episode) {
   }).catch(function (e) { DBG.push("FTP error: " + (e && e.message)); return []; });
 }
 
+// ---- collecting the streams source by source ---------------------------------------------------
+// each source writes its streams into the request's PART object the moment it is done; assemble() builds
+// the answer from whatever is in there, in the same order as before (movies: ShowTime, FTPBD, Cineplex;
+// series: Cineplex, FTPBD, ShowTime)
+function assemble(part) {
+  var order = part.order || ["st", "ftp", "cx"];
+  var out = [];
+  order.forEach(function (k) { if (part[k] && part[k].length) out = out.concat(part[k]); });
+  // the cookies are only known once the pages were read: stamp them on every CineplexBD stream
+  var ck = ckString();
+  if (ck) out.forEach(function (s) { if (s.name === "CineplexBD" && s.headers) s.headers["Cookie"] = ck; });
+  return out;
+}
+
 // ---- movies ------------------------------------------------------------------------------------
 // all playable links of one Cineplex movie (player.php holds the signed mp4; view.php as a fallback)
 function cxMovieLinks(id) {
@@ -519,32 +565,29 @@ function cxMovieLinks(id) {
   }).catch(function (e) { DBG.push("CX movie error: " + (e && e.message)); return []; });
 }
 
-// Cineplex first: its links are listed before the other sources
 function movieStreams(info) {
-  return Promise.all([searchCxFuzzy(info, function (l) {
+  var part = PART;
+  part.order = ["st", "ftp", "cx"];
+  var cxP = searchCxFuzzy(info, function (l) {
     return l.some(function (h) { return !h.series && titleMatches(h.title, h.year, info.name, info.year); });
-  }), searchSt(info.name), within(ftpMovie(info), FTP_DEADLINE, "FTP movie")]).then(function (res) {
-    var cxHits = res[0].filter(function (h) { return !h.series && titleMatches(h.title, h.year, info.name, info.year); }).slice(0, 3);
+  }).then(function (list) {
+    var cxHits = list.filter(function (h) { return !h.series && titleMatches(h.title, h.year, info.name, info.year); }).slice(0, 3);
     var mmid = manualId(MANUAL_MOVIE, info);
     if (mmid && !cxHits.some(function (h) { return String(h.id) === String(mmid); })) cxHits.unshift({ id: mmid, series: false, title: info.name, year: info.year, category: "" });
     DBG.push("CX movie hits: " + cxHits.length);
-    var others = [];
-    res[1].files.filter(function (h) { return titleMatches(h.title, null, info.name, info.year); }).forEach(function (h) {
-      others.push(makeStream("ShowTime", h.url, h.title + (h.size ? " · " + h.size : ""), false));
-    });
-    others = others.concat(res[2]);
     return Promise.all(cxHits.map(function (hit) {
       return cxMovieLinks(hit.id).then(function (urls) {
         return urls.map(function (u) { return makeStream("CineplexBD", u, hit.title + (hit.category ? " · " + hit.category : ""), true); });
       });
-    })).then(function (lists) {
-      var cx = [].concat.apply([], lists);
-      // the cookies are only known once the pages were read: stamp them on every CineplexBD stream
-      cx.forEach(function (s) { if (s.headers && ckString()) s.headers["Cookie"] = ckString(); });
-      // same order as before: other sources first, Cineplex after them
-      return others.concat(cx);
+    })).then(function (lists) { part.cx = [].concat.apply([], lists); });
+  }).catch(function (e) { DBG.push("CX movie error: " + (e && e.message)); });
+  var stP = searchSt(info.name).then(function (res) {
+    part.st = res.files.filter(function (h) { return titleMatches(h.title, null, info.name, info.year); }).map(function (h) {
+      return makeStream("ShowTime", h.url, h.title + (h.size ? " · " + h.size : ""), false);
     });
-  });
+  }).catch(function () {});
+  var ftP = within(ftpMovie(info), FTP_DEADLINE, "FTP movie").then(function (l) { part.ftp = l; });
+  return Promise.all([cxP, stP, ftP]).then(function () { return assemble(part); });
 }
 
 // ---- series ------------------------------------------------------------------------------------
@@ -691,9 +734,12 @@ function seriesStreamsCx(info, season, episode, forcedId) {
 }
 
 function seriesStreams(info, season, episode) {
-  return Promise.all([seriesStreamsCx(info, season, episode), within(ftpSeries(info, season, episode), FTP_DEADLINE, "FTP series"), seriesStreamsSt(info, season, episode)]).then(function (r) {
-    return r[0].concat(r[1]).concat(r[2]);
-  });
+  var part = PART;
+  part.order = ["cx", "ftp", "st"];
+  var a = seriesStreamsCx(info, season, episode).then(function (l) { part.cx = l; });
+  var b = within(ftpSeries(info, season, episode), FTP_DEADLINE, "FTP series").then(function (l) { part.ftp = l; });
+  var c = seriesStreamsSt(info, season, episode).then(function (l) { part.st = l; });
+  return Promise.all([a, b, c]).then(function () { return assemble(part); });
 }
 
 // ---- items that come from the "Cineplex" library add-on: id looks like cpxS34392 / cpxM1234 ------
@@ -735,8 +781,8 @@ function directStreams(cpx, season, episode) {
 
 function debugStream() {
   try { console.log("[CineFlex] " + DBG.join(" | ")); } catch (e) {}
-  // DIAGNOSIS BUILD: when nothing was found, show one "CineFlex debug" row whose text says why
-  return [{ name: "CineFlex debug", title: "v1.3.5-c " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
+  // when nothing was found, show one "CineFlex debug" row whose text says why
+  return [{ name: "CineFlex debug", title: "v1.3.6 " + DBG.join(" | ").slice(0, 600), quality: "480p", url: CX + "/debug.mp4", headers: { "User-Agent": UA } }];
 }
 
 // the title of a Cineplex library item, read from the add-on's own meta file (name, year)
@@ -751,18 +797,22 @@ function libraryTitle(cpx) {
   }).catch(function (e) { DBG.push("library meta error: " + (e && e.message)); return null; });
 }
 
+// resolves to the streams (an empty list when every source finished and found nothing)
 function getStreamsInner(tmdbId, mediaType, season, episode) {
   DBG = []; SCLOG = [];
   CK = {}; CK_TIME = 0; // fresh cookies for every request, as before (the server resets them every 6 h)
+  var part = PART;
   var isMovie = mediaType === "movie";
   var cpx = parseCpx(tmdbId);
   DBG.push("id: " + tmdbId + " type: " + mediaType + " s" + season + " e" + episode);
   if (cpx) {
+    part.order = ["direct"];
     return directStreams(cpx, season, episode).then(function (out) {
+      part.direct = out;
       if (out.length) return out;
       // not found on Cineplex -> look for the same title in the other sources, using the add-on's own title
       return libraryTitle(cpx).then(function (info) {
-        if (!info || !info.name) return debugStream();
+        if (!info || !info.name) return [];
         DBG.push("library fallback: " + info.name);
         if (cpx.kind === "M") return movieStreams(info);
         return seriesStreams(info, season, episode);
@@ -776,27 +826,31 @@ function getStreamsInner(tmdbId, mediaType, season, episode) {
       if (!info.name) return [];
       return isMovie ? movieStreams(info) : seriesStreams(info, season, episode);
     })
-    .catch(function (e) { DBG.push("error: " + (e && e.message)); return []; })
-    .then(function (out) {
-      if (out.length) return out;
-      return debugStream();
-    });
+    .catch(function (e) { DBG.push("error: " + (e && e.message)); return []; });
 }
 
-// Nuvio decides about 4-5 s after asking: answer before that, always with something (a debug row says why)
+// Nuvio decides about 4-5 s after asking: at DEADLINE answer with whatever the sources have handed in so far
+// (the rest keeps loading in the background and fills the caches, so a refresh is instant)
 function getStreams(tmdbId, mediaType, season, episode) {
   var t0 = Date.now();
+  PART = {};
+  var part = PART;
   var work;
   try { work = Promise.resolve(getStreamsInner(tmdbId, mediaType, season, episode)); }
   catch (e) { DBG.push("crash: " + (e && e.message)); work = Promise.resolve([]); }
   work = work.catch(function (e) { DBG.push("error: " + (e && e.message)); return []; });
   var timer = new Promise(function (resolve) {
-    setTimeout(function () { DBG.push("gave up after 3.8 s"); resolve(null); }, 3800);
+    setTimeout(function () { DBG.push("deadline " + DEADLINE + " ms"); resolve("deadline"); }, DEADLINE);
   });
   return Promise.race([work, timer]).then(function (out) {
     DBG.push("sc: " + SCLOG.join("/")); DBG.push("took " + (Date.now() - t0) + " ms");
+    if (out === "deadline") {
+      var got = assemble(part);
+      if (got.length) return got;
+      return DEBUG_ON_TIMEOUT ? debugStream() : [];
+    }
     if (out && out.length) return out;
-    return debugStream();
+    return SHOW_DEBUG_ROW ? debugStream() : [];
   });
 }
 
