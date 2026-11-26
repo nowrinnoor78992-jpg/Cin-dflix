@@ -1,0 +1,1 @@
+{"id":"bd.cineplex.test","version":"1.0.0","name":"Cineplex TEST","description":"id test","resources":["catalog","meta"],"types":["series"],"idPrefixes":["tt99","tmdb:"],"catalogs":[{"type":"series","id":"cpx-test","name":"Cineplex TEST","extra":[{"name":"skip"}]}]}
